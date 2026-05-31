@@ -185,6 +185,57 @@ function HomePage({ user, token, places }) {
   const [editingExp, setEditingExp] = useState(null);
   const [fromOpen, setFromOpen] = useState(false);
   const [toOpen, setToOpen] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceText, setVoiceText] = useState("");
+
+  // Thai number words to digits
+  const thaiNum = { "ศูนย์":0,"หนึ่ง":1,"สอง":2,"สาม":3,"สี่":4,"ห้า":5,"หก":6,"เจ็ด":7,"แปด":8,"เก้า":9,"สิบ":10,"สิบเอ็ด":11,"สิบสอง":12,"สิบสาม":13,"สิบสี่":14,"สิบห้า":15,"สิบหก":16,"สิบเจ็ด":17,"สิบแปด":18,"สิบเก้า":19,"ยี่สิบ":20,"สามสิบ":30,"สี่สิบ":40,"ห้าสิบ":50,"หกสิบ":60,"เจ็ดสิบ":70,"แปดสิบ":80,"เก้าสิบ":90,"ร้อย":100,"พัน":1000 };
+
+  const parseThaiNumber = (str) => {
+    // ถ้าเป็นตัวเลขอยู่แล้ว return เลย
+    if (/^\d+$/.test(str.trim())) return parseInt(str.trim());
+    for (const [word, val] of Object.entries(thaiNum)) {
+      if (str.includes(word)) return val;
+    }
+    return null;
+  };
+
+  const handleVoice = () => {
+    if (!'webkitSpeechRecognition' in window && !'SpeechRecognition' in window) {
+      return setError("browser ไม่รองรับการสั่งด้วยเสียงค่ะ");
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SR();
+    recognition.lang = "th-TH";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    setListening(true);
+    setVoiceText("");
+    recognition.start();
+    recognition.onresult = async (e) => {
+      const text = e.results[0][0].transcript;
+      setVoiceText(text);
+      setListening(false);
+      // parse: "[จุดรับ] ถึง [จุดส่ง] [จำนวน]คน"
+      const match = text.match(/(.+?)\s*ถึง\s*(.+?)\s*(\S+)\s*คน/);
+      if (!match) return setError(`ฟังไม่เข้าใจค่ะ ลองพูดว่า "ตลาด ถึง โรงงาน สิบคน"`);
+      const fromPlace = match[1].trim();
+      const toPlace = match[2].trim();
+      const countStr = match[3].trim();
+      const count = parseThaiNumber(countStr);
+      if (!count || count < 1) return setError("จำนวนคนไม่ถูกต้องค่ะ");
+      const price = defaultPrice || "0";
+      const body = { date: todayKey(), time: formatTime(new Date()), from_point: fromPlace, to_point: toPlace, type: "normal", count, price: +price, total: count * +price, user_id: user.id };
+      const res = await api.post("trips", body, token);
+      if (Array.isArray(res) && res[0]) {
+        setTrips(prev => [res[0], ...prev]);
+        setVoiceText(`✓ บันทึก ${fromPlace} → ${toPlace} ${count} คน`);
+        setTimeout(() => setVoiceText(""), 3000);
+      }
+    };
+    recognition.onerror = () => { setListening(false); setError("ฟังไม่ได้ยินค่ะ ลองใหม่อีกครั้ง"); };
+    recognition.onend = () => setListening(false);
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -327,8 +378,15 @@ function HomePage({ user, token, places }) {
           <div style={S.card} onClick={e => e.stopPropagation()}>
             <div style={S.cardHeader}>
               <span style={S.cardTitle}>{editingTrip ? "แก้ไขเที่ยว" : "เพิ่มเที่ยวใหม่"}</span>
-              <button style={S.closeBtn} onClick={() => { setShowForm(false); setEditingTrip(null); setError(""); }}>✕</button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button style={{ ...S.closeBtn, fontSize: 20, color: listening ? "#E07070" : "#C9A96E" }} onClick={handleVoice} title="สั่งด้วยเสียง">
+                  {listening ? "⏹" : "🎙"}
+                </button>
+                <button style={S.closeBtn} onClick={() => { setShowForm(false); setEditingTrip(null); setError(""); }}>✕</button>
+              </div>
             </div>
+            {voiceText && <div style={{ fontSize: 12, color: voiceText.startsWith("✓") ? "#7ECFA0" : "#C9A96E", marginBottom: 10, textAlign: "center", background: "#1F2231", borderRadius: 8, padding: "8px" }}>{listening ? "🎙 กำลังฟัง..." : voiceText}</div>}
+            {listening && <div style={{ fontSize: 12, color: "#C9A96E", marginBottom: 10, textAlign: "center", background: "#C9963A11", border: "1px solid #C9963A33", borderRadius: 8, padding: "8px" }}>🎙 กำลังฟัง... พูดได้เลยค่ะ</div>}
             <div style={S.typeToggle}>
               <button style={{ ...S.typeBtn, ...(tripType === "normal" ? S.typeBtnActive : {}) }} onClick={() => setTripType("normal")}>👥 ปกติ</button>
               <button style={{ ...S.typeBtn, ...(tripType === "charter" ? S.typeBtnCharter : {}) }} onClick={() => setTripType("charter")}>🚐 เหมา</button>
