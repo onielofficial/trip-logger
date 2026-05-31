@@ -91,10 +91,12 @@ function AuthPage({ onLogin }) {
     setLoading(false);
     if (res.error || res.msg) return setError(mode === "login" ? "username หรือ password ไม่ถูกต้องค่ะ" : "สมัครไม่สำเร็จ ลอง username อื่นดูนะคะ");
     const token = res.access_token;
+    const refreshToken = res.refresh_token;
     const userId = res.user?.id;
     localStorage.setItem("trip_token", token);
     localStorage.setItem("trip_user", JSON.stringify({ id: userId, username }));
-    onLogin({ token, id: userId, username });
+    if (refreshToken) localStorage.setItem("trip_refresh_token", refreshToken);
+    onLogin({ token, refreshToken, id: userId, username });
   };
 
   return (
@@ -623,6 +625,36 @@ export default function App() {
   const [places, setPlaces] = useState([]);
   const [navTab, setNavTab] = useState("home");
 
+  const handleLogout = () => {
+    localStorage.removeItem("trip_token");
+    localStorage.removeItem("trip_user");
+    localStorage.removeItem("trip_refresh_token");
+    localStorage.removeItem("trip_default_price");
+    setUser(null); setToken(null); setPlaces([]);
+  };
+
+  // Auto refresh token ทุก 50 นาที
+  useEffect(() => {
+    if (!user || !token) return;
+    const refresh = async () => {
+      const refreshToken = localStorage.getItem("trip_refresh_token");
+      if (!refreshToken) return;
+      const res = await authFetch("/auth/v1/token?grant_type=refresh_token", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (res.access_token) {
+        localStorage.setItem("trip_token", res.access_token);
+        if (res.refresh_token) localStorage.setItem("trip_refresh_token", res.refresh_token);
+        setToken(res.access_token);
+      } else {
+        handleLogout();
+      }
+    };
+    const interval = setInterval(refresh, 50 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user, token]);
+
   useEffect(() => {
     if (user && token) {
       api.get("places", `user_id=eq.${user.id}&order=name.asc`, token).then(p => {
@@ -635,10 +667,10 @@ export default function App() {
     }
   }, [user, token]);
 
-  const handleLogin = (u) => { setUser(u); setToken(u.token); };
-  const handleLogout = () => {
-    localStorage.removeItem("trip_token"); localStorage.removeItem("trip_user"); localStorage.removeItem("trip_default_price");
-    setUser(null); setToken(null); setPlaces([]);
+  const handleLogin = (u) => {
+    setUser(u);
+    setToken(u.token);
+    if (u.refreshToken) localStorage.setItem("trip_refresh_token", u.refreshToken);
   };
 
   if (!user) return <AuthPage onLogin={handleLogin} />;
