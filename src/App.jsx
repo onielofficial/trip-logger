@@ -207,13 +207,17 @@ function HomePage({ user, token, places }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.lang = "th-TH";
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    recognition.continuous = false;
     setListening(true);
     setVoiceText("");
-    recognition.start();
+    // delay start เล็กน้อยให้ browser เตรียมพร้อม
+    setTimeout(() => recognition.start(), 300);
     recognition.onresult = async (e) => {
-      const text = e.results[0][0].transcript;
+      const result = e.results[e.results.length - 1];
+      if (!result.isFinal) return;
+      const text = result[0].transcript;
       setVoiceText(text);
       setListening(false);
       // parse: "[จุดรับ] ถึง [จุดส่ง] [จำนวน]คน"
